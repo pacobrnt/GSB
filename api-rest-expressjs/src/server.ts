@@ -1,12 +1,14 @@
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit'; // <--- 1. Import du module
 import { Database } from './config/database';
-
+import { VisiteurRoutes } from './routes/Visiteur';
+import { PraticienRoutes } from './routes/Praticien';
+import { VisiteRoutes } from './routes/Visite';
 
 // Chargement des variables d'environnement
 dotenv.config();
-
 
 /**
  * Gère la configuration et le démarrage du serveur Express
@@ -15,7 +17,6 @@ class App {
   public app: Application;
   private port: number;
   private database: Database;
-
 
   constructor() {
     this.app = express();
@@ -27,11 +28,26 @@ class App {
     this.initializeDatabase();
   }
 
-
   /**
    * Configure les middlewares Express
    */
   private initializeMiddlewares(): void {
+    // --- 2. Configuration du Rate Limiter ---
+    const limiter = rateLimit({
+      windowMs: 15 * 60 * 1000, // Fenêtre de 15 minutes
+      max: 100, // Limite chaque IP à 100 requêtes par fenêtre
+      standardHeaders: true, // Retourne les infos de limite dans les headers `RateLimit-*`
+      legacyHeaders: false, // Désactive les headers `X-RateLimit-*`
+      message: {
+        status: 429,
+        message: 'Trop de requêtes effectuées depuis cette IP, veuillez réessayer plus tard.'
+      }
+    });
+
+    // Application du limiteur à toutes les requêtes
+    this.app.use(limiter);
+    // ----------------------------------------
+
     // Parse le JSON dans les requêtes
     this.app.use(express.json());
    
@@ -41,7 +57,6 @@ class App {
     // Active CORS pour toutes les origines
     this.app.use(cors());
   }
-
 
   /**
    * Configure les routes de l'application
@@ -58,7 +73,6 @@ class App {
       });
     });
 
-
     // Route de santé pour vérifier que l'API fonctionne
     this.app.get('/health', (req: Request, res: Response) => {
       res.json({
@@ -67,8 +81,19 @@ class App {
         uptime: process.uptime()
       });
     });
-  }
+  
+    // Routes visiteurs
+    const visiteurRoutes = new VisiteurRoutes();
+    this.app.use('/api/visiteurs', visiteurRoutes.router);
 
+    // Routes praticiens
+    const praticienRoutes = new PraticienRoutes();
+    this.app.use('/api/praticiens', praticienRoutes.router);
+
+    // Routes visites
+    const visiteRoutes = new VisiteRoutes();
+    this.app.use('/api/visites', visiteRoutes.router);
+  }
 
   /**
    * Initialise la connexion à la base de données
@@ -76,7 +101,6 @@ class App {
   private async initializeDatabase(): Promise<void> {
     await this.database.connect();
   }
-
 
   /**
    * Démarre le serveur Express
@@ -91,11 +115,9 @@ class App {
   }
 }
 
-
 // Création et démarrage de l'application
 const app = new App();
 app.listen();
-
 
 process.on('SIGINT', async () => {
   console.log('\n Arrêt du serveur...');
